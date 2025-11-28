@@ -1,11 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 import { EventService } from '../event/event.service';
 import { EventGeneratorService } from './event-generator.service';
 import { EventDispatcherService } from './event-dispatcher.service';
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
 
 @Injectable()
 export class SchedulerService {
@@ -18,6 +20,7 @@ export class SchedulerService {
     private readonly eventDispatcherService: EventDispatcherService,
     @InjectQueue('notification') private readonly notificationQueue: Queue,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     this.maxRetryAttempts = this.configService.get<number>(
       'scheduler.maxRetryAttempts',
@@ -51,6 +54,23 @@ export class SchedulerService {
   @Cron(CronExpression.EVERY_30_MINUTES, { name: 'recovery-events' })
   async scheduleEventRecovery() {
     this.logger.log('[Recovery Scheduler] Running...');
+    const LOCK_KEY = 'scheduler:lock:recovery-events';
+    const LOCK_TTL = this.configService.get<number>('scheduler.recoveryLockTtl', 60000);
+
+    const locked = await this.redis.set(
+      LOCK_KEY,
+      'locked',
+      'PX',
+      LOCK_TTL,
+      'NX',
+    );
+
+    if (!locked) {
+      this.logger.warn(
+        '[Recovery Scheduler] Skipped: Recovery is already running on another instance',
+      );
+      return;
+    }
 
     try {
       const failedEvents = await this.eventService.getFailedEventsForRetry(
@@ -92,6 +112,8 @@ export class SchedulerService {
         `[Recovery Scheduler] Error: ${error.message}`,
         error.stack,
       );
+    } finally {
+      await this.redis.del(LOCK_KEY);
     }
   }
 

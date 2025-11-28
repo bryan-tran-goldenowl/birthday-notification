@@ -2,10 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationProcessor } from './notification.processor';
 import { EventService } from '../event/event.service';
 import { NotificationService } from '../notification/notification.service';
-import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
 
 const mockRedis = {
   set: jest.fn(),
@@ -13,11 +12,6 @@ const mockRedis = {
   on: jest.fn(),
   quit: jest.fn(),
 };
-
-
-jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => mockRedis);
-});
 
 describe('NotificationProcessor', () => {
   let processor: NotificationProcessor;
@@ -34,11 +28,7 @@ describe('NotificationProcessor', () => {
     sendEventNotification: jest.fn(),
   };
 
-  const mockConfigService = {
-    get: jest.fn((key) => (key === 'redis.host' ? 'localhost' : 6379)),
-  };
-
-  
+  // Mock Job
   const mockJob = {
     id: 'job1',
     data: { eventLogId: 'log1' },
@@ -50,7 +40,7 @@ describe('NotificationProcessor', () => {
         NotificationProcessor,
         { provide: EventService, useValue: mockEventService },
         { provide: NotificationService, useValue: mockNotificationService },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: REDIS_CLIENT, useValue: mockRedis },
       ],
     }).compile();
 

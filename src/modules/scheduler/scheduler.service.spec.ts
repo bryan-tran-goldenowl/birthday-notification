@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { getQueueToken } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Settings } from 'luxon';
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
 
 
 const mockTimezones = ['Australia/Sydney', 'America/New_York'];
@@ -15,6 +16,12 @@ const mockFailedEvents = [
   { _id: 'event1', retryCount: 0, status: 'failed' },
   { _id: 'event2', retryCount: 1, status: 'pending' },
 ];
+
+const mockRedis = {
+  set: jest.fn(),
+  del: jest.fn(),
+  on: jest.fn(),
+};
 
 describe('SchedulerService', () => {
   let service: SchedulerService;
@@ -60,6 +67,7 @@ describe('SchedulerService', () => {
         { provide: EventDispatcherService, useValue: mockEventDispatcherService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: getQueueToken('notification'), useValue: mockQueue },
+        { provide: REDIS_CLIENT, useValue: mockRedis },
       ],
     }).compile();
 
@@ -72,10 +80,12 @@ describe('SchedulerService', () => {
 
     
     jest.clearAllMocks();
+    mockRedis.set.mockResolvedValue('OK');
     
     
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -106,6 +116,7 @@ describe('SchedulerService', () => {
       await service.scheduleEventRecovery();
 
       
+      expect(mockRedis.set).toHaveBeenCalled();
       expect(mockEventService.getFailedEventsForRetry).toHaveBeenCalled();
       
       
@@ -117,6 +128,7 @@ describe('SchedulerService', () => {
         { eventLogId: 'event1' },
         expect.objectContaining({ attempts: 1 })
       );
+      expect(mockRedis.del).toHaveBeenCalled();
     });
 
     it('should do nothing if no failed events found', async () => {
@@ -126,9 +138,19 @@ describe('SchedulerService', () => {
       
       await service.scheduleEventRecovery();
 
-      
+      expect(mockRedis.set).toHaveBeenCalled();
       expect(mockEventService.getFailedEventsForRetry).toHaveBeenCalled();
       expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockRedis.del).toHaveBeenCalled();
+    });
+    
+    it('should skip if lock is already held', async () => {
+      mockRedis.set.mockResolvedValue(null);
+      
+      await service.scheduleEventRecovery();
+      
+      expect(mockRedis.set).toHaveBeenCalled();
+      expect(mockEventService.getFailedEventsForRetry).not.toHaveBeenCalled();
     });
   });
 

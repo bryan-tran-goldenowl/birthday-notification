@@ -5,7 +5,9 @@ import { getModelToken } from '@nestjs/mongoose';
 import { User } from '../user/schemas/user.schema';
 import { EVENT_PROCESSORS } from '../../common/interfaces/event-processor.interface';
 import { EventType } from '../../common/enums/event-type.enum';
-
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
+import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 
 const mockBirthdayProcessor = {
   getEventType: () => EventType.BIRTHDAY,
@@ -18,6 +20,16 @@ const mockUser = {
   firstName: 'John',
   timezone: 'America/New_York',
   birthday: new Date('1990-12-25'),
+};
+
+const mockRedis = {
+  set: jest.fn(),
+  del: jest.fn(),
+  on: jest.fn(),
+};
+
+const mockConfigService = {
+  get: jest.fn((key, defaultValue) => defaultValue),
 };
 
 describe('EventGeneratorService (Date-Centric)', () => {
@@ -56,6 +68,14 @@ describe('EventGeneratorService (Date-Centric)', () => {
           provide: EVENT_PROCESSORS,
           useValue: [mockBirthdayProcessor],
         },
+        {
+          provide: REDIS_CLIENT,
+          useValue: mockRedis,
+        },
+        {
+          provide: ConfigService,
+          useValue: mockConfigService,
+        },
       ],
     }).compile();
 
@@ -64,6 +84,9 @@ describe('EventGeneratorService (Date-Centric)', () => {
     userModel = module.get(getModelToken(User.name));
 
     jest.clearAllMocks();
+    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -71,6 +94,7 @@ describe('EventGeneratorService (Date-Centric)', () => {
   });
 
   it('should generate events by iterating days (Date-Centric)', async () => {
+    mockRedis.set.mockResolvedValue('OK');
     
     const mockDate = new Date('2023-12-20T00:00:00Z');
     jest.useFakeTimers().setSystemTime(mockDate);
@@ -85,6 +109,8 @@ describe('EventGeneratorService (Date-Centric)', () => {
 
     
     expect(userModel.distinct).not.toHaveBeenCalled();
+    
+    expect(mockRedis.set).toHaveBeenCalled();
 
     expect(userModel.find).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -105,5 +131,7 @@ describe('EventGeneratorService (Date-Centric)', () => {
     const flatOps = calls.flat(); 
     
     expect(flatOps.length).toBeGreaterThan(0);
+    
+    expect(mockRedis.del).toHaveBeenCalled();
   });
 });

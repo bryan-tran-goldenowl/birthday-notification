@@ -1,35 +1,22 @@
 import { Processor, Process } from '@nestjs/bull';
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import type { Job } from 'bull';
 import Redis from 'ioredis';
 import { EventService } from '../event/event.service';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationStatus } from '../../common/enums/notification-status.enum';
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
 
 @Processor('notification')
 @Injectable()
 export class NotificationProcessor {
   private readonly logger = new Logger(NotificationProcessor.name);
-  private readonly redis: Redis;
 
   constructor(
     private readonly eventService: EventService,
     private readonly notificationService: NotificationService,
-    private readonly configService: ConfigService,
-  ) {
-    
-    this.redis = new Redis({
-      host: this.configService.get('redis.host', 'localhost'),
-      port: this.configService.get('redis.port', 6379),
-      password: this.configService.get('redis.password', ''),
-      db: this.configService.get('redis.db', 0),
-    });
-
-    this.redis.on('error', (error) => {
-      this.logger.error(`Redis connection error: ${error.message}`);
-    });
-  }
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
  
 
@@ -117,10 +104,5 @@ export class NotificationProcessor {
       
       await this.redis.del(lockKey);
     }
-  }
-
- 
-  async onModuleDestroy() {
-    await this.redis.quit();
   }
 }

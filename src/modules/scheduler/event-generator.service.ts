@@ -1,11 +1,14 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import Redis from 'ioredis';
+import { ConfigService } from '@nestjs/config';
 import { User, UserDocument } from '../user/schemas/user.schema';
 import { EventService } from '../event/event.service';
 import { EventType } from '../../common/enums/event-type.enum';
 import { NotificationStatus } from '../../common/enums/notification-status.enum';
 import { TimezoneUtil } from '../../common/utils/timezone.util';
+import { REDIS_CLIENT } from '../../common/redis/redis.module';
 import {
   IEventProcessor,
   EVENT_PROCESSORS,
@@ -19,13 +22,45 @@ export class EventGeneratorService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly eventService: EventService,
     @Inject(EVENT_PROCESSORS) private readonly processors: IEventProcessor[],
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly configService: ConfigService,
   ) {}
 
   
   async generateEvents(): Promise<void> {
+    const LOCK_KEY = 'scheduler:lock:generate-events';
+    const LOCK_TTL = this.configService.get<number>('scheduler.lockTtl', 300000);
+
+    
+    const locked = await this.redis.set(
+      LOCK_KEY,
+      'locked',
+      'PX',
+      LOCK_TTL,
+      'NX',
+    );
+
+    if (!locked) {
+      this.logger.warn(
+        '[Generator] Skipped: Generator is already running on another instance',
+      );
+      return;
+    }
+
     try {
-      const DAYS_TO_SCAN = 30;
-      const CONCURRENCY_LIMIT = 10;
+      const DAYS_TO_SCAN = this.configService.get<number>('generator.daysToScan', 30);
+      const CONCURRENCY_LIMIT = this.configService.get<number>(
+        'generator.concurrencyLimit',
+        10,
+      );
+      const CURSOR_BATCH_SIZE = this.configService.get<number>(
+        'generator.cursorBatchSize',
+        10000,
+      );
+      const BULK_WRITE_BATCH_SIZE = this.configService.get<number>(
+        'generator.bulkWriteBatchSize',
+        5000,
+      );
       const now = new Date();
       let processedCount = 0;
 
@@ -81,7 +116,7 @@ export class EventGeneratorService {
               const cursor = this.userModel
                 .find(queryFilter)
                 .lean()
-                .cursor({ batchSize: 10000 });
+                .cursor({ batchSize: CURSOR_BATCH_SIZE });
 
               const operations: any[] = [];
               
@@ -96,7 +131,7 @@ export class EventGeneratorService {
                     operations.push(...userOps);
                   }
 
-                  if (operations.length >= 5000) {
+                  if (operations.length >= BULK_WRITE_BATCH_SIZE) {
                     await this.eventService.bulkUpsertEvents(operations);
                     processedCount += operations.length;
                     operations.length = 0;
@@ -120,6 +155,8 @@ export class EventGeneratorService {
     } catch (error) {
       this.logger.error(`[Generator] Error: ${error.message}`, error.stack);
       throw error;
+    } finally {
+      await this.redis.del(LOCK_KEY);
     }
   }
 
