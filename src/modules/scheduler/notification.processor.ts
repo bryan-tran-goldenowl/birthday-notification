@@ -18,7 +18,7 @@ export class NotificationProcessor {
     private readonly notificationService: NotificationService,
     private readonly configService: ConfigService,
   ) {
-    // Initialize Redis client for distributed locking
+    
     this.redis = new Redis({
       host: this.configService.get('redis.host', 'localhost'),
       port: this.configService.get('redis.port', 6379),
@@ -31,23 +31,20 @@ export class NotificationProcessor {
     });
   }
 
-  /**
-   * Process send-notification jobs from the queue
-   */
-  @Process('send-notification')
+ 
+
+  @Process({ name: 'send-notification', concurrency: 10 })
   async handleSendNotification(job: Job<{ eventLogId: string }>) {
     const { eventLogId } = job.data;
     const lockKey = `notification-lock:${eventLogId}`;
 
-    this.logger.log(`[Notification Processor] Processing job ${job.id} for event ${eventLogId}`);
-
-    // Acquire distributed lock (30s TTL, only set if not exists)
+    
     const lock = await this.redis.set(
       lockKey,
       '1',
       'PX',
-      30000, // 30 seconds TTL
-      'NX', // Only set if not exists
+      30000,
+      'NX',
     );
 
     if (!lock) {
@@ -74,7 +71,6 @@ export class NotificationProcessor {
 
       const message = this.eventService.getMessageForEvent(eventLog);
 
-      this.logger.log(`[Notification Processor] Sending notification: "${message}"`);
       const success = await this.notificationService.sendEventNotification(
         eventLog,
         message,
@@ -120,13 +116,10 @@ export class NotificationProcessor {
     } finally {
       
       await this.redis.del(lockKey);
-      this.logger.log(`[Notification Processor] Released lock for event ${eventLogId}`);
     }
   }
 
-  /**
-   * Cleanup on module destroy
-   */
+ 
   async onModuleDestroy() {
     await this.redis.quit();
   }

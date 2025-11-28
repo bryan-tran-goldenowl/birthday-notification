@@ -18,7 +18,6 @@ export class User {
   lastName: string;
 
   @Factory((faker) => {
-    // ALL birthdays set to today (with random birth year)
     const today = new Date();
     const year = faker?.number.int({ min: 1924, max: 2005 }) || 1990;
     return new Date(year, today.getMonth(), today.getDate());
@@ -38,13 +37,10 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
-
-// Performance indexes
-// Optimize for: find({ timezone: '...' }) and distinct('timezone')
+  
 UserSchema.index({ timezone: 1, birthday: 1 });
 UserSchema.index({ timezone: 1, anniversaryDate: 1 });
 
-// Virtual for full name
 UserSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });

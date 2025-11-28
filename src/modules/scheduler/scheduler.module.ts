@@ -3,6 +3,8 @@ import { BullModule } from '@nestjs/bull';
 import { SchedulerService } from './scheduler.service';
 import { SchedulerController } from './scheduler.controller';
 import { NotificationProcessor } from './notification.processor';
+import { EventGeneratorService } from './event-generator.service';
+import { EventDispatcherService } from './event-dispatcher.service';
 import { UserModule } from '../user/user.module';
 import { EventModule } from '../event/event.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -17,7 +19,12 @@ import { NotificationModule } from '../notification/notification.module';
     NotificationModule,
   ],
   controllers: [SchedulerController],
-  providers: [SchedulerService, NotificationProcessor],
+  providers: [
+    SchedulerService,
+    EventGeneratorService,
+    EventDispatcherService,
+    NotificationProcessor,
+  ],
   exports: [SchedulerService],
 })
 export class SchedulerModule {}

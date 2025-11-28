@@ -11,6 +11,7 @@ const UserSchema = new mongoose.Schema(
     lastName: { type: String, required: true, maxlength: 100 },
     birthday: { type: Date, required: true },
     timezone: { type: String, required: true, maxlength: 50 },
+    anniversaryDate: { type: Date },
   },
   {
     timestamps: true,
@@ -28,12 +29,13 @@ async function generateUsers(count: number) {
     lastName: string;
     birthday: Date;
     timezone: string;
+    anniversaryDate?: Date;
   }> = [];
   const today = new Date();
 
   
-  const month = today.getUTCMonth();
-  const day = today.getUTCDate();
+  const month = faker.number.int({ min: 0, max: 11 });
+  const day = faker.number.int({ min: 1, max: 28 });
 
   for (let i = 0; i < count; i++) {
     const year = faker.number.int({ min: 1924, max: 2005 });
@@ -41,12 +43,21 @@ async function generateUsers(count: number) {
   
     const birthday = new Date(Date.UTC(year, month, day));
 
-    users.push({
+    const user = {
       firstName: faker.person.firstName(),
       lastName: faker.person.lastName(),
       birthday: birthday,
       timezone: faker.location.timeZone(),
-    });
+    };
+
+    if (faker.datatype.boolean(0.2)) {
+      const annivYear = faker.number.int({ min: 1995, max: 2020 });
+      const annivMonth = faker.number.int({ min: 0, max: 11 });
+      const annivDay = faker.number.int({ min: 1, max: 28 });
+      user['anniversaryDate'] = new Date(Date.UTC(annivYear, annivMonth, annivDay));
+    }
+
+    users.push(user);
   }
 
   return users;

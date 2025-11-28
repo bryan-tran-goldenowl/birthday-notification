@@ -3,6 +3,7 @@ import { WebhookChannel } from './webhook.channel';
 import axios from 'axios';
 
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -24,6 +25,11 @@ describe('WebhookChannel', () => {
 
     channel = module.get<WebhookChannel>(WebhookChannel);
     jest.clearAllMocks();
+    
+    
+    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
   });
 
   describe('send', () => {

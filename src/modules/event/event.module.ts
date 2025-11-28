@@ -28,6 +28,10 @@ const processors = [BirthdayProcessor, AnniversaryProcessor];
     },
     EventService,
   ],
-  exports: [EventService, EVENT_PROCESSORS],
+  exports: [
+    EventService,
+    EVENT_PROCESSORS,
+    MongooseModule,
+  ],
 })
 export class EventModule {}

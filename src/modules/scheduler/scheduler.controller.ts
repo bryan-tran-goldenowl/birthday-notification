@@ -7,29 +7,27 @@ import { SchedulerService } from './scheduler.service';
 export class SchedulerController {
   constructor(private readonly schedulerService: SchedulerService) {}
 
-  @Post('trigger-events')
+  @Post('trigger-generation')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Manually trigger event check (for testing)' })
-  @ApiResponse({ status: 200, description: 'Event check triggered' })
-  async triggerEvents() {
-    return await this.schedulerService.triggerEventCheck();
+  @ApiOperation({ summary: 'Manually trigger event generation (for testing)' })
+  @ApiResponse({ status: 200, description: 'Event generation triggered' })
+  async triggerGeneration() {
+    return await this.schedulerService.triggerGeneration();
   }
 
-  @Post('trigger-recover')
+  @Post('trigger-dispatch')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Manually trigger recovery (for testing)' })
+  @ApiOperation({ summary: 'Manually trigger event dispatch (for testing)' })
+  @ApiResponse({ status: 200, description: 'Event dispatch triggered' })
+  async triggerDispatch() {
+    return await this.schedulerService.triggerDispatch();
+  }
+
+  @Post('trigger-recovery')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Manually trigger failed event recovery (for testing)' })
   @ApiResponse({ status: 200, description: 'Recovery triggered' })
-  async triggerRecover() {
+  async triggerRecovery() {
     return await this.schedulerService.scheduleEventRecovery();
-  }
-
-  @Post('trigger-backfill')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Manually trigger backfill/catch-up for missed events today',
-  })
-  @ApiResponse({ status: 200, description: 'Backfill triggered successfully' })
-  async triggerBackfill() {
-    return await this.schedulerService.triggerBackfill();
   }
 }

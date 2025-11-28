@@ -5,6 +5,7 @@ import {
   NotificationLog,
   NotificationLogDocument,
 } from './schemas/notification-log.schema';
+import { User, UserDocument } from '../user/schemas/user.schema';
 import { EventType } from '../../common/enums/event-type.enum';
 import { NotificationStatus } from '../../common/enums/notification-status.enum';
 import { TimezoneUtil } from '../../common/utils/timezone.util';
@@ -21,6 +22,8 @@ export class EventService {
   constructor(
     @InjectModel(NotificationLog.name)
     private readonly notificationLogModel: Model<NotificationLogDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     @Inject(EVENT_PROCESSORS)
     private readonly processors: IEventProcessor[],
   ) {
@@ -31,77 +34,22 @@ export class EventService {
   }
 
  
-
-  /**
-   * Process events for timezone and return created logs
-   * Uses bulk upsert to avoid N+1 queries
-   */
-  async processEventsForTimezone(
-    timezone: string,
-    users: any[],
-    eventType: EventType,
-  ): Promise<NotificationLog[]> {
-    if (users.length === 0) {
-      return [];
-    }
-
-    const eventYear = TimezoneUtil.getCurrentYear(timezone);
-    const bulkOps = users.map((user) => ({
-      updateOne: {
-        filter: {
-          userId: new Types.ObjectId(user._id.toString()),
-          eventType,
-          eventYear,
-        },
-        update: {
-          $setOnInsert: {
-            userId: new Types.ObjectId(user._id.toString()),
-            eventType,
-            eventYear,
-            status: NotificationStatus.PENDING,
-            metadata: { timezone },
-            retryCount: 0,
-          },
-        },
-        upsert: true,
-      },
-    }));
-
-    try {
-      await this.notificationLogModel.bulkWrite(bulkOps, { ordered: false });
-    } catch (error) {
-      if (error.code !== 11000) {
-        this.logger.warn(`Bulk upsert error: ${error.message}`);
-      }
-    }
-
-    
-    return this.notificationLogModel
-      .find({
-        eventYear,
-        eventType,
-        userId: { $in: users.map((u) => new Types.ObjectId(u._id.toString())) },
-      })
-      .exec();
-  }
-
-  /**
-   * Get events that need retry:
-   * - FAILED events (ready for retry)
-   * - PENDING events stuck > 1 hour (zombie detection)
-   * Resets them to PENDING for reprocessing
-   */
   async getFailedEventsForRetry(
     maxRetries: number = 12,
   ): Promise<NotificationLog[]> {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const now = new Date();
 
     const eventsToRetry = await this.notificationLogModel
       .find({
         retryCount: { $lt: maxRetries },
         $or: [
           { status: NotificationStatus.FAILED },
-          { status: NotificationStatus.PENDING, updatedAt: { $lt: oneHourAgo } },
+          {
+            status: NotificationStatus.PENDING,
+            updatedAt: { $lt: oneHourAgo },
+            scheduledAt: { $lte: now },
+          },
         ],
       })
       .populate('userId')
@@ -119,9 +67,7 @@ export class EventService {
     return eventsToRetry;
   }
 
-  /**
-   * Find notification log by ID
-   */
+
   async findById(id: string): Promise<NotificationLog> {
     const log = await this.notificationLogModel
       .findById(id)
@@ -135,9 +81,7 @@ export class EventService {
     return log;
   }
 
-  /**
-   * Update notification log status
-   */
+  
   async updateEventStatus(
     id: string,
     status: NotificationStatus,
@@ -157,9 +101,7 @@ export class EventService {
     await this.notificationLogModel.findByIdAndUpdate(id, updateData).exec();
   }
 
-  /**
-   * Get message for event
-   */
+  
   getMessageForEvent(eventLog: any): string {
     const processor = this.processorMap.get(eventLog.eventType);
     if (!processor) {
@@ -167,5 +109,114 @@ export class EventService {
     }
 
     return processor.generateMessage(eventLog.userId);
+  }
+
+  
+  async findEventsDueForDispatch(now: Date): Promise<NotificationLog[]> {
+    return this.notificationLogModel
+      .find({
+        status: NotificationStatus.PENDING,
+        scheduledAt: { $lte: now },
+      })
+      .sort({ scheduledAt: 1 })
+      .limit(5000)
+      .exec();
+  }
+
+ 
+  async bulkUpsertEvents(operations: any[]): Promise<void> {
+    try {
+      await this.notificationLogModel.bulkWrite(operations, { ordered: false });
+    } catch (error) {
+      
+      if (error.code !== 11000) {
+        throw error;
+      }
+    }
+  }
+
+  
+  async recalculateUserEvents(
+    userId: string,
+    newTimezone?: string,
+    newBirthday?: Date,
+    newAnniversary?: Date,
+  ): Promise<void> {
+  
+    const user = await this.userModel.findById(userId).lean().exec();
+    if (!user) {
+      this.logger.warn(`[Event Service] User ${userId} not found for recalculation`);
+      return;
+    }
+
+    const timezone = newTimezone || user.timezone;
+    const birthday = newBirthday || user.birthday;
+    const anniversary = newAnniversary || user.anniversaryDate;
+
+    const now = new Date();
+
+    
+    const futureEvents = await this.notificationLogModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        status: { $in: [NotificationStatus.PENDING, NotificationStatus.FAILED] },
+        scheduledAt: { $gt: now }, 
+      })
+      .exec();
+
+    if (futureEvents.length === 0) {
+      this.logger.log(`[Event Service] No future events to recalculate for user ${userId}`);
+      return;
+    }
+
+    this.logger.log(
+      `[Event Service] Recalculating ${futureEvents.length} event(s) for user ${userId}`,
+    );
+
+    
+    for (const event of futureEvents) {
+      try {
+        const eventDate =
+          event.eventType === EventType.BIRTHDAY ? birthday : anniversary;
+
+        if (!eventDate) {
+          this.logger.warn(
+            `[Event Service] No event date for ${event.eventType} event ${event._id}`,
+          );
+          continue;
+        }
+
+        const checkHour = event.eventType === EventType.BIRTHDAY ? 9 : 10;
+
+        const newScheduledAt = TimezoneUtil.calculateScheduledAt(
+          eventDate,
+          checkHour,
+          timezone,
+          event.eventYear,
+        );
+
+        await this.notificationLogModel.updateOne(
+          { _id: event._id },
+          {
+            $set: {
+              scheduledAt: newScheduledAt,
+              'metadata.timezone': timezone,
+            },
+          },
+        );
+
+        this.logger.debug(
+          `[Event Service] Recalculated event ${event._id}: ${newScheduledAt}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[Event Service] Error recalculating event ${event._id}: ${error.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[Event Service] Successfully recalculated events for user ${userId}`,
+    );
   }
 }

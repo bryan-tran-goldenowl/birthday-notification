@@ -8,7 +8,10 @@ import { Types } from 'mongoose';
 import { EVENT_PROCESSORS } from '../../common/interfaces/event-processor.interface';
 
 
-const mockUserId = new Types.ObjectId();
+import { User } from '../user/schemas/user.schema';
+
+
+
 const mockLogId = new Types.ObjectId();
 
 describe('EventService', () => {
@@ -22,6 +25,11 @@ describe('EventService', () => {
     findByIdAndUpdate: jest.fn(),
     bulkWrite: jest.fn(),
     updateMany: jest.fn(),
+    updateOne: jest.fn(),
+  };
+
+  const mockUserModel = {
+    findById: jest.fn(),
   };
 
   
@@ -53,6 +61,10 @@ describe('EventService', () => {
           useValue: mockNotificationLogModel,
         },
         {
+          provide: getModelToken(User.name),
+          useValue: mockUserModel,
+        },
+        {
           provide: EVENT_PROCESSORS,
           useValue: [mockProcessor],
         },
@@ -72,38 +84,6 @@ describe('EventService', () => {
   });
 
   
-
-  describe('processEventsForTimezone', () => {
-    it('should perform bulk upsert for valid users', async () => {
-      
-      const users = [{ _id: mockUserId, birthday: new Date() }];
-      const timezone = 'Australia/Sydney';
-      const eventType = EventType.BIRTHDAY;
-
-      mockNotificationLogModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([{ _id: 'log1' }]),
-      });
-
-      
-      await service.processEventsForTimezone(timezone, users, eventType);
-
-      
-      expect(mockNotificationLogModel.bulkWrite).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            updateOne: expect.objectContaining({
-              upsert: true,
-              filter: expect.objectContaining({
-                userId: mockUserId,
-                eventType: EventType.BIRTHDAY,
-              }),
-            }),
-          }),
-        ]),
-        expect.objectContaining({ ordered: false }),
-      );
-    });
-  });
 
   describe('getFailedEventsForRetry', () => {
     it('should fetch FAILED or STUCK PENDING events and reset them to PENDING', async () => {
@@ -126,7 +106,8 @@ describe('EventService', () => {
             { status: NotificationStatus.FAILED },
             { 
               status: NotificationStatus.PENDING, 
-              updatedAt: expect.any(Object) 
+              updatedAt: expect.any(Object),
+              scheduledAt: expect.any(Object)
             },
           ]),
         })
@@ -209,6 +190,30 @@ describe('EventService', () => {
       const eventLog = { eventType: 'UNKNOWN_TYPE', userId: {} };
       const msg = service.getMessageForEvent(eventLog);
       expect(msg).toBe('Happy event!');
+    });
+  });
+
+  describe('findEventsDueForDispatch', () => {
+    it('should find pending events due for dispatch with limit', async () => {
+      const now = new Date();
+      const expectedEvents = [{ _id: 'event1' }];
+
+      mockNotificationLogModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(expectedEvents),
+      });
+
+      const result = await service.findEventsDueForDispatch(now);
+
+      expect(mockNotificationLogModel.find).toHaveBeenCalledWith({
+        status: NotificationStatus.PENDING,
+        scheduledAt: { $lte: now },
+      });
+      
+      
+      expect(mockNotificationLogModel.find().sort().limit).toHaveBeenCalledWith(5000);
+      expect(result).toEqual(expectedEvents);
     });
   });
 });

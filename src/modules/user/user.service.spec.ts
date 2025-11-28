@@ -4,25 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { UserService } from './user.service';
 import { User } from './schemas/user.schema';
 import { TimezoneUtil } from '../../common/utils/timezone.util';
-
-// Mock Redis
-const mockRedis = {
-  get: jest.fn(),
-  set: jest.fn(),
-  del: jest.fn(),
-  on: jest.fn(),
-  quit: jest.fn(),
-};
-
-jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => mockRedis);
-});
+import { UserEventService } from './user-event.service';
 
 describe('UserService', () => {
   let service: UserService;
   let model: any;
 
-  // Mock Data
   const mockUsers = [
     { firstName: 'Tuan', timezone: 'Australia/Sydney' },
     { firstName: 'John', timezone: 'America/New_York' },
@@ -42,7 +29,10 @@ describe('UserService', () => {
     get: jest.fn((key) => (key === 'redis.host' ? 'localhost' : 6379)),
   };
 
-  // Mock TimezoneUtil methods that are used
+  const mockUserEventService = {
+    recalculateUserEvents: jest.fn().mockResolvedValue(undefined),
+  };
+
   jest.spyOn(TimezoneUtil, 'getTodayMonthDay').mockImplementation((timezone) => {
     if (timezone === 'Australia/Sydney') return { month: 11, day: 26 };
     return { month: 1, day: 1 };
@@ -57,6 +47,7 @@ describe('UserService', () => {
           useValue: mockUserModel,
         },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: UserEventService, useValue: mockUserEventService },
       ],
     }).compile();
 
@@ -66,51 +57,10 @@ describe('UserService', () => {
     jest.clearAllMocks();
   });
 
-  describe('getDistinctTimezones (Caching Logic)', () => {
-    it('should query DB if cache is empty (Redis miss)', async () => {
-      const timezones = ['Australia/Sydney', 'UTC'];
-      mockRedis.get.mockResolvedValue(null); // Cache miss
-      mockUserModel.distinct.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(timezones),
-      });
-
-      const result = await service.getDistinctTimezones();
-
-      expect(mockRedis.get).toHaveBeenCalledWith('CACHE:TIMEZONES');
-      expect(mockUserModel.distinct).toHaveBeenCalledWith('timezone');
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        'CACHE:TIMEZONES',
-        JSON.stringify(timezones),
-        'EX',
-        3600
-      );
-      expect(result).toEqual(timezones);
-    });
-
-    it('should return cached data without querying DB if cache exists (Redis hit)', async () => {
-      const cachedTimezones = ['Cached/Zone'];
-      mockRedis.get.mockResolvedValue(JSON.stringify(cachedTimezones));
-
-      const result = await service.getDistinctTimezones();
-
-      expect(mockRedis.get).toHaveBeenCalledWith('CACHE:TIMEZONES');
-      expect(mockUserModel.distinct).not.toHaveBeenCalled();
-      expect(result).toEqual(cachedTimezones);
-    });
-  });
-
-  describe('invalidateTimezoneCache', () => {
-    it('should delete the cache key in Redis', async () => {
-      await service.invalidateTimezoneCache();
-      expect(mockRedis.del).toHaveBeenCalledWith('CACHE:TIMEZONES');
-    });
-  });
-
   describe('CRUD Operations', () => {
     describe('create', () => {
-      it('should create user and invalidate cache', async () => {
+      it('should create user', async () => {
         const dto = { firstName: 'John', birthday: '1990-01-01', timezone: 'UTC' } as any;
-        const mockSavedUser = { _id: '123', ...dto };
         
       });
     });
@@ -143,7 +93,7 @@ describe('UserService', () => {
     });
 
     describe('update', () => {
-      it('should update user and invalidate cache if timezone changed', async () => {
+      it('should update user', async () => {
         const updateDto = { timezone: 'New/Zone' };
         mockUserModel.findByIdAndUpdate = jest.fn().mockReturnValue({
           exec: jest.fn().mockResolvedValue({ ...mockUsers[0], timezone: 'New/Zone' }),
@@ -156,7 +106,6 @@ describe('UserService', () => {
           expect.objectContaining(updateDto), 
           { new: true }
         );
-        expect(mockRedis.del).toHaveBeenCalledWith('CACHE:TIMEZONES'); // Cache cleared
         expect(result.timezone).toBe('New/Zone');
       });
 
@@ -169,7 +118,7 @@ describe('UserService', () => {
     });
 
     describe('remove', () => {
-      it('should delete user and invalidate cache', async () => {
+      it('should delete user', async () => {
         mockUserModel.findByIdAndDelete = jest.fn().mockReturnValue({
           exec: jest.fn().mockResolvedValue({ _id: '1' }),
         });
@@ -177,7 +126,6 @@ describe('UserService', () => {
         await service.remove('1');
         
         expect(mockUserModel.findByIdAndDelete).toHaveBeenCalledWith('1');
-        expect(mockRedis.del).toHaveBeenCalledWith('CACHE:TIMEZONES'); // Cache cleared
       });
 
       it('should throw NotFoundException if user not found', async () => {

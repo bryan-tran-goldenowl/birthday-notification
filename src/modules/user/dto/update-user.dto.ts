@@ -24,4 +24,9 @@ export class UpdateUserDto {
   @IsOptional()
   @MaxLength(50)
   timezone?: string;
+
+  @ApiPropertyOptional({ example: '2020-06-20', description: 'User anniversary date (YYYY-MM-DD)' })
+  @IsDateString()
+  @IsOptional()
+  anniversaryDate?: string;
 }

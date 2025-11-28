@@ -34,6 +34,9 @@ export class NotificationLog {
   @Prop({ type: Date })
   sentAt?: Date;
 
+  @Prop({ type: Date })
+  scheduledAt?: Date;
+
   @Prop({ default: 0 })
   retryCount: number;
 
@@ -56,5 +59,15 @@ NotificationLogSchema.index(
   { unique: true, name: 'idx_unique_notification' },
 );
 
-
 NotificationLogSchema.index({ status: 1, createdAt: 1 });
+
+
+NotificationLogSchema.index(
+  { status: 1, scheduledAt: 1 },
+  { name: 'idx_status_scheduled_at' },
+);
+
+NotificationLogSchema.index(
+  { userId: 1, status: 1, scheduledAt: 1 },
+  { name: 'idx_user_status_scheduled' },
+);

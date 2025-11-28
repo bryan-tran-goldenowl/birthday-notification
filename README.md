@@ -1,52 +1,66 @@
 # Birthday Notification System
 
-A robust, scalable Node.js application designed to send birthday notifications to users at exactly 9 AM in their local timezone. Built with **NestJS**, **MongoDB**, **Redis**, and **BullMQ**.
-
+A robust, scalable Node.js application designed to send birthday notifications to users at exactly 9 AM in their local timezone. Built with **NestJS**, **MongoDB**, **Redis**, and **Bull**.
 
 ## 🚀 Key Features
 
-*   **Timezone Aware**: Schedules notifications based on the user's local time (e.g., 9 AM in Sydney vs. 9 AM in New York).
-*   **Scalability**:
-    *   **Batches**: Processes multiple timezones in batches (`processInBatches`) to handle high loads.
-    *   **Distributed Caching**: Uses **Redis** to cache timezone data, reducing database load.
-    *   **Distributed Locking**: Uses **Redis** locks to ensure only one worker processes a job at a time.
-    *   **Bulk Operations**: Utilizes MongoDB `bulkWrite` for high-performance batch creation of event logs.
-*   **Reliability**:
-    *   **Idempotency**: Guarantees strict unique execution via MongoDB Unique Compound Indexes (`userId` + `eventType` + `year`).
-    *   **Recovery & Backfill**: Includes automatic retry for failed jobs and a **Manual Backfill API** to recover missed events after downtime.
-    *   **Testing Mode**: Includes a built-in `TestWebhookController` with sequential failure simulation to verify retry logic. Or using link https://eowypdtgjxh1eib.m.pipedream.net
+### 1. Timezone Aware
+- Sends notifications based on each user’s local time.
 
+### 2. High Performance & Scalable
+- **Day-Based Generator**  
+  Checks days in parallel chunk (10-day groups)
+- **Parallel Processing**  
+  Uses Bull Queue with multiple workers (e.g., 10 workers) to process many jobs at the same time.
+- **Distributed Locking**  
+  Uses Redis locks to make sure only one worker processes an event to avoid duplicates.
+
+### 3. Reliability
+- **No Duplicate Jobs**  
+  Uses a fixed `jobId` (Event Log ID) to prevent duplicate queue jobs.
+- **Auto Recovery**  
+  Pre-calculated events allow easy recovery after downtime.  
+  Failed jobs are removed from Redis so they can retry cleanly.
+- **User Update Sync**  
+  When a user changes timezone or birthday, future events are recalculated automatically.
 
 ## 🛠 Tech Stack
 
 *   **Framework**: [NestJS](https://nestjs.com/) (TypeScript)
 *   **Database**: [MongoDB](https://www.mongodb.com/) (Data storage)
 *   **Queue**: [Bull](https://github.com/OptimalBits/bull) (Job processing)
-*   **Cache**: [Redis](https://redis.io/) (Timezone caching & Distributed locks)
+*   **Cache**: [Redis](https://redis.io/) (Distributed locks)
 *   **Testing**: [Jest](https://jestjs.io/) (Unit tests)
 
-## 🔄 System Flow
+## 🔄 System Flow (Pre-Calculation Model)
+
+### Flow Diagram
+
+![System Flow](diagram.png)
 
 1.  **User Management**:
     *   Users are created via API.
-    *   When a user is added/updated, the Redis Timezone Cache is invalidated.
+    *   **User updates** (timezone/birthday changes) trigger automatic recalculation of ALL future pending events.
 
-2.  **Scheduler (Hourly)**:
-    *   Fetches distinct timezones from Redis (or DB if cache miss).
-    *   Filters timezones where the current local time is **9:00 AM**.
-    *   Triggers `BirthdayProcessor` for matching timezones.
+2.  **Event Generator (Hourly)**:
+    *   **Strategy**: Date-Centric Parallel Scan.
+    *   For each day, finds users matching `month` and `day`.
+    *   Creates `NotificationLog` records using `bulkWrite` with `upsert` (prevents duplicates).
 
-3.  **Event Processing**:
-    *   `BirthdayProcessor` finds users with birthdays matching today (in their timezone).
-    *   `EventService` creates `NotificationLog` records using `bulkWrite` with `upsert` (Idempotency check).
-    *   Jobs are pushed to the `notification` Bull Queue.
+3.  **Event Dispatcher (Every 5 Minutes)**:
+    *   Queries `NotificationLog` for events with `status: PENDING` and `scheduledAt <= now`.
+    *   Pushes matching events to the `notification` Bull Queue with **Fixed JobID** (`eventLogId`).
 
 4.  **Notification Worker**:
-    *   `NotificationProcessor` picks up jobs.
+    *   `NotificationProcessor` picks up jobs (Concurrency: 10).
     *   Acquires a **Redis Lock** for the specific event.
-    *   Checks status.
-    *   Sends webhook request (defaulting to the internal Test Webhook).
+    *   Checks status (skip if already `SENT`).
+    *   Sends webhook request.
     *   Updates status to `SENT` or `FAILED`.
+
+5.  **Recovery (Every 30 Minutes)**:
+    *   Retries `FAILED` events (up to max retry attempts).
+    *   Detects `PENDING` events stuck > 1 hour and re-queues them.
 
 ## 🏁 Getting Started
 
@@ -63,9 +77,9 @@ A robust, scalable Node.js application designed to send birthday notifications t
     cd birthday-notification
     ```
 
-2.  Install dependencies (optional, for local dev):
+2.  Install dependencies:
     ```bash
-    make install
+    npm install
     ```
 
 3.  Setup Environment Variables:
@@ -78,43 +92,28 @@ A robust, scalable Node.js application designed to send birthday notifications t
 Start the entire stack (App + MongoDB + Redis) using Docker:
 
 ```bash
-make up
+docker-compose up -d
 ```
 
 *   **API**: `http://localhost:3000`
-*   **Swagger Docs**: `http://localhost:3000/api`
-*   **Bull Dashboard**: `http://localhost:3000/admin/queues`
 *   **Test Webhook**: `http://localhost:3000/test-webhook`
-
-
-To stop the services:
-```bash
-make down
-```
 
 ### Seeding Data
 
-To populate the database with 1000 fake users:
-
-**Important:** If running from host machine (outside Docker), verify `MONGODB_URI` points to `localhost:27018`.
-
+**1. User Seeding (1 Million Users)**
+Populates the database with fake users.
 ```bash
-export MONGODB_URI=mongodb://localhost:27018/birthday_notification
-make seed
+# Ensure MongoDB is running on localhost:27018 (exposed by Docker)
+npx ts-node src/database/seeders/seed-user.ts
 ```
-
 
 
 ## 🧪 Testing
 
-The project maintains high test coverage (>85%) for core business logic.
-
 ```bash
 # Run Unit Tests
-make test
+npm test (or make test)
 
-# Run Tests with Coverage Report
-make test-cov
 ```
 
 ## 🔌 API Reference
@@ -124,27 +123,12 @@ make test-cov
 *   `DELETE /user/:id`: Delete a user.
 *   `PUT /user/:id`: Update user details.
 
-### Scheduler & Recovery
-*   `POST /scheduler/trigger-backfill`: **Recovery API**. Scans all timezones that have passed 9 AM today and processes any missed events. Useful after server downtime.
-*   `POST /scheduler/trigger-events`: Manually trigger the hourly check (for testing).
+### Scheduler Triggers (Manual)
+*   `POST /scheduler/trigger-generation`: Trigger Generator manually.
+*   `POST /scheduler/trigger-dispatch`: Trigger Dispatcher manually.
 
 ### Test Webhook
 *   `POST /test-webhook`: Simulates a webhook receiver.
-    *   Fails every 3rd request by default to test retry logic.
-
-##  Handling Server Downtime
-
-**Scenario:** The server crashes at 8:00 AM and restarts at 2:00 PM. Users in timezones where 9:00 AM occurred during the downtime (e.g., 10 AM, 11 AM) would normally be missed.
-
-**Solution:**
-1.  **Backfill Mechanism:** The system has a backfill logic that checks `isPastCheckHour`.
-2.  **Action:** Upon restart, an administrator triggers the recovery endpoint:
-    ```bash
-    curl -X POST http://localhost:3000/scheduler/trigger-backfill
-    ```
-3.  **Result:** The system identifies all timezones where the current time is **past 9 AM**, checks for missing logs, and processes them safely.
-
-[![Demo Video](https://img.youtube.com/vi/xMW5LlsnzNM/0.jpg)](https://www.youtube.com/watch?v=xMW5LlsnzNM)
 
 ---
-Author: [Your Name]
+Author: Bryan

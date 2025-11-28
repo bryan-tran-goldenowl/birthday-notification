@@ -38,7 +38,7 @@ describe('NotificationProcessor', () => {
     get: jest.fn((key) => (key === 'redis.host' ? 'localhost' : 6379)),
   };
 
-  // Mock Job
+  
   const mockJob = {
     id: 'job1',
     data: { eventLogId: 'log1' },
@@ -59,7 +59,7 @@ describe('NotificationProcessor', () => {
     notificationService = module.get<NotificationService>(NotificationService);
 
     jest.clearAllMocks();
-    // Silence logger
+    
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -93,7 +93,7 @@ describe('NotificationProcessor', () => {
 
       
       expect(notificationService.sendEventNotification).not.toHaveBeenCalled();
-      expect(mockRedis.del).toHaveBeenCalled(); // Should release lock
+      expect(mockRedis.del).toHaveBeenCalled();
     });
 
     it('should send notification and update status to SENT on success', async () => {
@@ -105,7 +105,7 @@ describe('NotificationProcessor', () => {
         userId: { firstName: 'Tuan' }
       });
       mockEventService.getMessageForEvent.mockReturnValue('Happy Birthday');
-      mockNotificationService.sendEventNotification.mockResolvedValue(true); // Success
+      mockNotificationService.sendEventNotification.mockResolvedValue(true); 
 
       
       await processor.handleSendNotification(mockJob);
@@ -129,7 +129,7 @@ describe('NotificationProcessor', () => {
         _id: 'log1', 
         status: 'pending' 
       });
-      mockNotificationService.sendEventNotification.mockResolvedValue(false); // Failed
+      mockNotificationService.sendEventNotification.mockResolvedValue(false); 
 
       
       await expect(processor.handleSendNotification(mockJob)).rejects.toThrow('Notification sending failed');

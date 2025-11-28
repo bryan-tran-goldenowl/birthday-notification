@@ -25,7 +25,6 @@ export class WebhookChannel implements INotificationChannel {
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
-      this.logger.log(`Sending webhook: ${message}`);
 
       const response = await axios.post(
         this.webhookUrl,
@@ -43,7 +42,6 @@ export class WebhookChannel implements INotificationChannel {
       );
 
       if (response.status >= 200 && response.status < 300) {
-        this.logger.log(`Webhook sent successfully: ${message}`);
         return true;
       }
 
