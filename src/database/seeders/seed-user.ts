@@ -4,19 +4,17 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-
 const UserSchema = new mongoose.Schema(
   {
     firstName: { type: String, required: true, maxlength: 100 },
     lastName: { type: String, required: true, maxlength: 100 },
     birthday: { type: Date, required: true },
     timezone: { type: String, required: true, maxlength: 50 },
-    anniversaryDate: { type: Date },
   },
   {
     timestamps: true,
     collection: 'users',
-  }
+  },
 );
 
 UserSchema.index({ birthday: 1, timezone: 1 });
@@ -26,36 +24,57 @@ const User = mongoose.model('User', UserSchema);
 async function generateUsers(count: number) {
   const users: Array<{
     firstName: string;
-    lastName: string;
-    birthday: Date;
-    timezone: string;
-    anniversaryDate?: Date;
-  }> = [];
-  const today = new Date();
 
-  
-  const month = faker.number.int({ min: 0, max: 11 });
-  const day = faker.number.int({ min: 1, max: 28 });
+    lastName: string;
+
+    birthday: Date;
+
+    timezone: string;
+  }> = [];
+
+  const now = new Date();
+
+  const currentMonth = now.getUTCMonth();
+
+  const currentDay = now.getUTCDate();
 
   for (let i = 0; i < count; i++) {
     const year = faker.number.int({ min: 1924, max: 2005 });
 
-  
+    let month: number;
+
+    let day: number;
+
+    const rand = Math.random();
+
+    if (rand < 0.8) {
+      month = currentMonth;
+
+      day = currentDay;
+    } else {
+      
+      const futureOffset = faker.number.int({ min: 1, max: 30 });
+
+      const futureDate = new Date(
+        Date.UTC(year, currentMonth, currentDay + futureOffset),
+      );
+
+      month = futureDate.getUTCMonth();
+
+      day = futureDate.getUTCDate();
+    }
+
     const birthday = new Date(Date.UTC(year, month, day));
 
     const user = {
       firstName: faker.person.firstName(),
+
       lastName: faker.person.lastName(),
+
       birthday: birthday,
+
       timezone: faker.location.timeZone(),
     };
-
-    if (faker.datatype.boolean(0.2)) {
-      const annivYear = faker.number.int({ min: 1995, max: 2020 });
-      const annivMonth = faker.number.int({ min: 0, max: 11 });
-      const annivDay = faker.number.int({ min: 1, max: 28 });
-      user['anniversaryDate'] = new Date(Date.UTC(annivYear, annivMonth, annivDay));
-    }
 
     users.push(user);
   }
@@ -65,7 +84,9 @@ async function generateUsers(count: number) {
 
 async function seed() {
   try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27018/birthday_notification';
+    const MONGODB_URI =
+      process.env.MONGODB_URI ||
+      'mongodb://localhost:27018/birthday_notification';
 
     console.log('🌱 Starting user seeding...');
     console.log(`📡 Connecting to: ${MONGODB_URI}`);
@@ -73,8 +94,8 @@ async function seed() {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ Connected to MongoDB');
 
-    const TOTAL_USERS = 1000;
-    const BATCH_SIZE = 100;
+    const TOTAL_USERS = 100000;
+    const BATCH_SIZE = 10000;
     const batches = Math.ceil(TOTAL_USERS / BATCH_SIZE);
 
     let totalInserted = 0;
@@ -85,10 +106,8 @@ async function seed() {
     for (let i = 0; i < batches; i++) {
       const batchStartTime = Date.now();
 
-      
       const users = await generateUsers(BATCH_SIZE);
 
-      
       await User.insertMany(users, { ordered: false });
 
       totalInserted += BATCH_SIZE;
@@ -98,24 +117,25 @@ async function seed() {
 
       console.log(
         `📊 Progress: ${progress}% | Batch ${i + 1}/${batches} | ` +
-        `${totalInserted.toLocaleString()}/${TOTAL_USERS.toLocaleString()} users | ` +
-        `Batch time: ${batchTime}s | Total time: ${totalTime}s`
+          `${totalInserted.toLocaleString()}/${TOTAL_USERS.toLocaleString()} users | ` +
+          `Batch time: ${batchTime}s | Total time: ${totalTime}s`,
       );
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`\n✅ Seeding completed! ${TOTAL_USERS.toLocaleString()} users created in ${totalTime}s`);
+    console.log(
+      `\n✅ Seeding completed! ${TOTAL_USERS.toLocaleString()} users created in ${totalTime}s`,
+    );
 
-    
     const total = await User.countDocuments();
     const today = new Date();
     const birthdaysToday = await User.countDocuments({
       $expr: {
         $and: [
           { $eq: [{ $month: '$birthday' }, today.getMonth() + 1] },
-          { $eq: [{ $dayOfMonth: '$birthday' }, today.getDate()] }
-        ]
-      }
+          { $eq: [{ $dayOfMonth: '$birthday' }, today.getDate()] },
+        ],
+      },
     });
     const uniqueTimezones = (await User.distinct('timezone')).length;
 
@@ -136,7 +156,9 @@ async function seed() {
 
 async function drop() {
   try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27018/birthday_notification';
+    const MONGODB_URI =
+      process.env.MONGODB_URI ||
+      'mongodb://localhost:27018/birthday_notification';
 
     console.log('🗑️  Dropping all users...');
     console.log(`📡 Connecting to: ${MONGODB_URI}`);
@@ -156,7 +178,6 @@ async function drop() {
     process.exit(1);
   }
 }
-
 
 const args = process.argv.slice(2);
 if (args.includes('--drop')) {
